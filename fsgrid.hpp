@@ -889,13 +889,13 @@ template <typename T, int stencil> class FsGrid {
             systemDim[i] = (double)GlobalSize[i];
          }
          processDomainDecomposition = {1, 1, 1};
-         for (int i = 1; i <= std::min(nProcs, GlobalSize[0]); i++) {
+         for (int i = 1; i <= std::min(nProcs, GlobalSize[0]/stencil); i++) {
             processBox[0] = std::max(systemDim[0]/i, 1.0);
-            for (int j = 1; j <= std::min(nProcs, GlobalSize[1]) ; j++) {
+            for (int j = 1; j <= std::min(nProcs, GlobalSize[1]/stencil) ; j++) {
                if( i * j  > nProcs )
                   break;
                processBox[1] = std::max(systemDim[1]/j, 1.0);
-               for (int k = 1; k <= std::min(nProcs, GlobalSize[2]); k++) {
+               for (int k = 1; k <= std::min(nProcs, GlobalSize[2]/stencil); k++) {
                   if( i * j * k > nProcs )
                      break;
                   processBox[2] = std::max(systemDim[2]/k, 1.0);
