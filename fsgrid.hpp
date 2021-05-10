@@ -382,7 +382,7 @@ template <typename T, int stencil> class FsGrid {
       }
 
       /*! Transform global cell coordinates into the local domain.
-       * If the coordinates are out of bounds, (-1,-1,-1) is returned.
+       * If the coordinates are out of bounds, (-stencil,-stencil,-stencil) is returned.
        * \param x The cell's global x coordinate
        * \param y The cell's global y coordinate
        * \param z The cell's global z coordinate
@@ -395,7 +395,7 @@ template <typename T, int stencil> class FsGrid {
 
          if(retval[0] > localSize[0] || retval[1] > localSize[1] || retval[2] > localSize[2]
                || retval[0] < 0 || retval[1] < 0 || retval[2] < 0) {
-            return {-1,-1,-1};
+            return {-stencil,-stencil,-stencil};
          }
 
          return retval;
