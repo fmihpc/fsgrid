@@ -27,6 +27,10 @@
 #include <stdint.h>
 #include <cassert>
 
+#ifdef USEHDF5
+#include "hdf5.h"
+#include <omp.h>
+#endif
 
 
 
@@ -976,9 +980,101 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
 
          return *this;
       }
-   
-      
-   
+
+#ifdef USEHDF5
+      bool writeHDF(std::string Filename,std::map<int,std::string> variables){
+
+
+         hid_t file_id, dset_id;   
+         hid_t filespace, memspace;
+         hsize_t dimsf[3];         
+         double *mydata;              
+         hsize_t count[3];         
+         hsize_t offset[3];
+
+
+         hid_t plist_id;
+         int i;
+         herr_t status;
+         int mpi_size, mpi_rank;
+         MPI_Comm comm = MPI_COMM_WORLD;
+         MPI_Info info = MPI_INFO_NULL;
+         MPI_Comm_size(comm, &mpi_size);
+
+         plist_id = H5Pcreate(H5P_FILE_ACCESS);
+         H5Pset_fapl_mpio(plist_id, comm, info);
+
+         char *writable = new char[Filename.size() + 1];
+         std::copy(Filename.begin(), Filename.end(), writable);
+         writable[Filename.size()] = '\0';
+
+         file_id = H5Fcreate(writable, H5F_ACC_TRUNC, H5P_DEFAULT, plist_id);
+         H5Pclose(plist_id);
+         delete[] writable;
+
+
+         dimsf[0]  = this->globalSize[0];
+         dimsf[1]  = this->globalSize[1];
+         dimsf[2]  = this->globalSize[2];
+         count[0]  = this->localSize[0];
+         count[1]  = this->localSize[1];
+         count[2]  = this->localSize[2];
+         offset[0] = this->localStart[0];
+         offset[1] = this->localStart[1];
+         offset[2] = this->localStart[2];
+         mydata = (double *)new double[count[0] * count[1] * count[2]];
+
+         // Loop through variables  and write!
+         for (auto const& var : variables)  {
+
+            char *varName = new char[var.second.size() + 1];
+            std::copy(var.second.begin(), var.second.end(), varName);
+            varName[var.second.size()] = '\0';
+
+
+
+            filespace = H5Screate_simple(3, dimsf, NULL);
+            memspace = H5Screate_simple(3, count, NULL);
+
+            plist_id = H5Pcreate(H5P_DATASET_CREATE);
+            H5Pset_chunk(plist_id, 3, count);
+            dset_id = H5Dcreate(file_id, varName, H5T_NATIVE_DOUBLE, filespace,H5P_DEFAULT, plist_id, H5P_DEFAULT);
+            H5Pclose(plist_id);
+            H5Sclose(filespace);
+
+            filespace = H5Dget_space(dset_id);
+            H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, NULL, count, NULL);
+            
+
+            #pragma omp parallel for collapse(3)
+            for(int z=0; z<localSize[2]; z++) {
+               for(int y=0; y<localSize[1]; y++) {
+                  for(int x=0; x<localSize[0]; x++) {
+                     int64_t locIndex = z + y * localSize[2] + x * localSize[2] * localSize[1];
+                     mydata[locIndex]=this->get(x,y,z)->at(var.first);
+                  }
+               }
+            }
+
+
+            plist_id = H5Pcreate(H5P_DATASET_XFER);
+            H5Pset_dxpl_mpio(plist_id, H5FD_MPIO_COLLECTIVE);
+
+            status = H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace, plist_id, mydata);
+            delete[] varName;
+            H5Dclose(dset_id);
+            H5Pclose(plist_id);
+            H5Sclose(memspace);
+            H5Sclose(filespace);
+         }
+
+
+         H5Fclose(file_id);
+
+         return true;
+      }
+
+#endif
 
    private:
       //! MPI Cartesian communicator used in this grid
