@@ -141,8 +141,19 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
        * \param MPI_Comm The MPI communicator this grid should use.
        * \param isPeriodic An array specifying, for each dimension, whether it is to be treated as periodic.
        */
-   FsGrid(std::array<int32_t,3> globalSize, MPI_Comm parent_comm, std::array<bool,3> isPeriodic, FsGridCouplingInformation& coupling)
-            : globalSize(globalSize),coupling(coupling) {
+      FsGrid(std::array<int32_t, 3> globalSize, MPI_Comm parent_comm, std::array<bool, 3> isPeriodic, FsGridCouplingInformation &coupling)
+          : parentCom(parent_comm),globalSize(globalSize), coupling(coupling){
+         this->init(parent_comm,isPeriodic);
+      }
+
+      //Copy constructor
+      FsGrid(const FsGrid<T, stencil> &other) 
+         : parentCom(other.parentCom),periodic(other.periodic), globalSize(other.globalSize),  coupling(other.coupling){
+         init(parentCom,periodic);
+         this->data = other.data;
+      }
+
+      void init(MPI_Comm &parent_comm,std::array<bool, 3> isPeriodic){
          int status;
          int size;
 
@@ -965,27 +976,68 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       //! Copy the entire data from another FsGrid of the same signature over.
       FsGrid<T, stencil>& operator=(const FsGrid<T, stencil>& other) {
 
-         // Don't copy if sizes mismatch.
-         // (Should this instead crash the program?)
-         if(other.localSize[0] != localSize[0]   ||
-            other.localSize[1] != localSize[1]   ||
-            other.localSize[2] != localSize[2]) {
-            return *this;
-         }
+         // Fail if sizes mismatch.
+         assert(other.localSize[0] == this->localSize[0]);
+         assert(other.localSize[1] == this->localSize[1]);
+         assert(other.localSize[2] == this->localSize[2]);
          data = other.data;
-
          return *this;
       }
-   
-      
-   
+
+      FsGrid<T, stencil>& operator+=(const FsGrid<T, stencil>& rhs) {
+         assert(this->data.size()==rhs.data.size());
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]+rhs.data[i];
+         }
+         return *this;
+      }
+
+      FsGrid<T, stencil>& operator-=(const FsGrid<T, stencil>& rhs) {
+         assert(this->data.size()==rhs.data.size());
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]-rhs.data[i];
+         }
+         return *this;
+      }
+
+      FsGrid<T, stencil>& operator*=(const FsGrid<T, stencil>& rhs) {
+         assert(this->data.size()==rhs.data.size());
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]*rhs.data[i];
+         }
+         return *this;
+      }
+
+      FsGrid<T, stencil>& operator/=(const FsGrid<T, stencil>& rhs) {
+         assert(this->data.size()==rhs.data.size());
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]/rhs.data[i];
+         }
+         return *this;
+      }
+
+      template <typename S, typename std::enable_if<std::is_arithmetic<S>::value>::type * = nullptr>
+      FsGrid<T, stencil> &operator*=(S factor){
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]*factor;
+         }
+         return *this;
+      }
+
+      template <typename S, typename std::enable_if<std::is_arithmetic<S>::value>::type * = nullptr>
+      FsGrid<T, stencil> &operator/=(S factor){
+         for (size_t i=0; i< this->data.size(); i++){
+            this->data[i] = this->data[i]/factor;
+         }
+         return *this;
+      }
 
    private:
       //! MPI Cartesian communicator used in this grid
-      MPI_Comm comm3d;
-      int rank; //!< This task's rank in the communicator
-      std::vector<MPI_Request> requests;
-      uint numRequests;
+         MPI_Comm comm3d, parentCom;
+         int rank; //!< This task's rank in the communicator
+         std::vector<MPI_Request> requests;
+         uint numRequests;
 
       std::array<int, 27> neighbour; //!< Tasks of the 26 neighbours (plus ourselves)
       std::vector<char> neighbour_index; //!< Lookup table from rank to index in the neighbour array
@@ -1040,3 +1092,110 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          array[2] = a;
       }
 };
+
+
+//Array Operator Overloads
+template <typename T, size_t N>
+static inline std::array<T,N> operator+(const std::array<T, N>& arr1, const std::array<T, N>& arr2){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+       res[i] = arr1[i] + arr2[i];
+   }
+   return res; 
+}
+
+template <typename T, size_t N>
+static inline std::array<T,N> operator-(const std::array<T, N>& arr1, const std::array<T, N>& arr2){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+       res[i] = arr1[i] - arr2[i];
+   }
+   return res; 
+}
+
+template <typename T, size_t N>
+static inline std::array<T, N> operator*(const std::array<T, N> &arr1, const std::array<T, N> &arr2){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+      res[i] = arr1[i] * arr2[i];
+   }
+   return res;
+}
+
+template <typename T, size_t N>
+static inline std::array<T,N> operator/(const std::array<T, N>& arr1, const std::array<T, N>& arr2){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+      res[i] = arr1[i] / arr2[i];
+   } 
+   return res; 
+}
+
+template <typename T, size_t N,typename S,typename std::enable_if<std::is_arithmetic<S>::value>::type* = nullptr>
+std::array<T,N> operator*(std::array<T, N>& arr, S factor){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+       res[i]=arr[i]*factor;
+   } 
+   return res; 
+}
+
+template <typename T, size_t N,typename S,typename std::enable_if<std::is_arithmetic<S>::value>::type* = nullptr>
+std::array<T,N> operator/(std::array<T, N>& arr, S factor){
+   std::array<T, N> res;
+   for (size_t i = 0; i < N; ++i){
+       res[i]=arr[i]/factor;
+   } 
+   return res; 
+}
+
+
+// FsGrid Operator Overloads
+template <class T, int stencil>
+static inline FsGrid<T, stencil> operator+(const FsGrid<T, stencil> &lhs, const FsGrid<T, stencil> &rhs){
+   FsGrid<T, stencil> a(lhs);
+   return a+=rhs;
+}
+
+template <class T, int stencil>
+static inline FsGrid<T, stencil> operator-(const FsGrid<T, stencil> &lhs, const FsGrid<T, stencil> &rhs){
+   FsGrid<T, stencil> a(lhs);
+   return a-=rhs;
+}
+
+template <class T, int stencil>
+static inline FsGrid<T, stencil> operator*(const FsGrid<T, stencil> &lhs, const FsGrid<T, stencil> &rhs){
+   FsGrid<T, stencil> a(lhs);
+   return a *= rhs;
+}
+
+template <class T,int stencil, typename S, typename std::enable_if<std::is_arithmetic<S>::value>::type * = nullptr>
+static inline FsGrid<T, stencil> operator*(const FsGrid<T, stencil>& lhs, S factor){
+   FsGrid<T,stencil> a(lhs);
+   return a*=factor;
+}
+
+template <class T,int stencil, typename S, typename std::enable_if<std::is_arithmetic<S>::value>::type * = nullptr>
+static inline FsGrid<T, stencil> operator/(const FsGrid<T, stencil>& lhs, S factor){
+   FsGrid<T,stencil> a(lhs);
+   return a/=factor;
+}
+
+template <class T, int stencil>
+static inline FsGrid<T, stencil> operator/(const FsGrid<T, stencil> &lhs, const FsGrid<T, stencil> &rhs){
+   FsGrid<T, stencil> a(lhs);
+   return a /= rhs;
+}
+
+
+/* Here tNorm is the interpolation time but normalized. 
+ * So  t0=0 , t1=1 and then for any t>1 we have  a 
+ * linear extrapolation */
+template <class T, int stencil,typename S,typename std::enable_if<std::is_arithmetic<S>::value>::type* = nullptr>
+static inline FsGrid<T, stencil>  lerp_t(const  FsGrid<T, stencil> &lhs, const FsGrid<T, stencil> &rhs,S tNorm){
+   //If sizes mismatch then this will make it crash in the '=' operator later on
+   //Do interpolate-targetGrid=lhs(1-t)+rhs*t1
+   return lhs*(1. - tNorm) + rhs*tNorm;
+}
+
+

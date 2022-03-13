@@ -33,8 +33,9 @@ int main(int argc, char** argv) {
    // Create a 8×8 Testgrid
    std::array<int32_t, 3> globalSize{20,20,1};
    std::array<bool, 3> isPeriodic{false,false,true};
+   FsGridCouplingInformation gridCoupling;
    {
-      FsGrid<int,1> testGrid(globalSize, MPI_COMM_WORLD, isPeriodic);
+      FsGrid<int,1> testGrid(globalSize, MPI_COMM_WORLD, isPeriodic,gridCoupling);
 /*
       if(rank == 0) {
          std::cerr << " --- Test task mapping functions ---" << std::endl;
@@ -190,9 +191,7 @@ int main(int argc, char** argv) {
          }
       }
    }
-      
 
-      
       MPI_Finalize();
 
       return 0;
