@@ -26,8 +26,8 @@
 #include <limits>
 #include <stdint.h>
 #include <cassert>
-
-
+#include <map>
+#include <set>
 
 
 struct FsGridTools{
@@ -109,6 +109,9 @@ struct FsGridTools{
 
 
 struct FsGridCouplingInformation {
+   std::map<int, std::set<uint64_t> > onDccrgMapRemoteProcess;
+   std::map<int, std::set<uint64_t> > onFsgridMapRemoteProcess;
+   std::map<uint64_t, std::vector<int64_t> > onFsgridMapCells;
    std::vector<int> externalRank; //!< MPI rank that each cell is being communicated to externally
 
    void setCouplingSize(size_t totalStorageSize) {
@@ -964,6 +967,10 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          return MPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm3d);
       }
 
+
+   public:
+      FsGridCouplingInformation* coupling; // Information required to couple to external grids
+
    private:
       //! MPI Cartesian communicator used in this grid
       MPI_Comm comm3d;
@@ -987,8 +994,6 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       std::array<int32_t, 3> localStart; //!< Offset of the local
                                           //!coordinate system against
                                           //!the global one
-
-      FsGridCouplingInformation* coupling; // Information required to couple to external grids
 
       std::array<MPI_Datatype, 27> neighbourSendType; //!< Datatype for sending data
       std::array<MPI_Datatype, 27> neighbourReceiveType; //!< Datatype for receiving data
