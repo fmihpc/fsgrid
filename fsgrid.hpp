@@ -393,6 +393,37 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                MPI_Type_commit(&(neighbourSendType[i]));
          }
 
+         // setup persistent communication
+         for(int i = 0; i < 27; i++){
+            receiveRequests[i] = MPI_REQUEST_NULL;
+            sendRequests[i] = MPI_REQUEST_NULL;
+         }
+
+         for(int x=-1; x<=1;x++) {
+            for(int y=-1; y<=1;y++) {
+               for(int z=-1; z<=1; z++) {
+                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
+                  int receiveId = (1 - x) * 9 + ( 1 - y) * 3 + ( 1 - z);
+                  if(neighbour[receiveId] != MPI_PROC_NULL &&
+                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
+                     MPI_Recv_init(data.data(), 1, neighbourReceiveType[shiftId], neighbour[receiveId], shiftId, comm3d, &(receiveRequests[shiftId]));
+                  }
+               }
+            }
+         }
+
+         for(int x=-1; x<=1;x++) {
+            for(int y=-1; y<=1;y++) {
+               for(int z=-1; z<=1; z++) {
+                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
+                  int sendId = shiftId;
+                  if(neighbour[sendId] != MPI_PROC_NULL &&
+                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
+                     MPI_Send_init(data.data(), 1, neighbourSendType[shiftId], neighbour[sendId], shiftId, comm3d, &(sendRequests[shiftId]));
+                  }
+               }
+            }
+         }
 
       }
 
@@ -696,47 +727,11 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       /*! Perform ghost cell communication.
        */
       void updateGhostCells() {
-         //TODO, faster with simultaneous isends& ireceives?
-         std::array<MPI_Request, 27> receiveRequests;
-         std::array<MPI_Request, 27> sendRequests;
-         
-         for(int i = 0; i < 27; i++){
-            receiveRequests[i] = MPI_REQUEST_NULL;
-            sendRequests[i] = MPI_REQUEST_NULL;
-         }
-         
-         
-         for(int x=-1; x<=1;x++) {
-            for(int y=-1; y<=1;y++) {
-               for(int z=-1; z<=1; z++) {
-                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
-                  int receiveId = (1 - x) * 9 + ( 1 - y) * 3 + ( 1 - z);
-                  if(neighbour[receiveId] != MPI_PROC_NULL &&
-                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
-                     MPI_Irecv(data.data(), 1, neighbourReceiveType[shiftId], neighbour[receiveId], shiftId, comm3d, &(receiveRequests[shiftId]));
-                  }
-               }
-            }
-         }
-         
-         for(int x=-1; x<=1;x++) {
-            for(int y=-1; y<=1;y++) {
-               for(int z=-1; z<=1; z++) {
-                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
-                  int sendId = shiftId;
-                  if(neighbour[sendId] != MPI_PROC_NULL &&
-                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
-                     MPI_Isend(data.data(), 1, neighbourSendType[shiftId], neighbour[sendId], shiftId, comm3d, &(sendRequests[shiftId]));
-                  }
-               }
-            }
-         }
+         MPI_Start_all(receiveRequests);
+         MPI_Start_all(sendRequests);
          MPI_Waitall(27, receiveRequests.data(), MPI_STATUSES_IGNORE);         
          MPI_Waitall(27, sendRequests.data(), MPI_STATUSES_IGNORE);
       }
-   
-   
-   
 
       /*! Get the size of the local domain handled by this grid.
        */
@@ -973,6 +968,10 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
 
       std::array<int, 27> neighbour; //!< Tasks of the 26 neighbours (plus ourselves)
       std::vector<char> neighbour_index; //!< Lookup table from rank to index in the neighbour array
+
+      std::array<MPI_Request, 27> receiveRequests;
+      std::array<MPI_Request, 27> sendRequests;
+      bool persistentCommWasSetup;
 
       // We have, fundamentally, two different coordinate systems we're dealing with:
       // 1) Task grid in the MPI_Cartcomm
