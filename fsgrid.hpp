@@ -727,8 +727,32 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       /*! Perform ghost cell communication.
        */
       void updateGhostCells() {
-         MPI_Start_all(receiveRequests);
-         MPI_Start_all(sendRequests);
+         for(int x=-1; x<=1;x++) {
+            for(int y=-1; y<=1;y++) {
+               for(int z=-1; z<=1; z++) {
+                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
+                  int receiveId = (1 - x) * 9 + ( 1 - y) * 3 + ( 1 - z);
+                  if(neighbour[receiveId] != MPI_PROC_NULL &&
+                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
+                     MPI_Start(&(receiveRequests[shiftId]));
+                  }
+               }
+            }
+         }
+
+         for(int x=-1; x<=1;x++) {
+            for(int y=-1; y<=1;y++) {
+               for(int z=-1; z<=1; z++) {
+                  int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
+                  int sendId = shiftId;
+                  if(neighbour[sendId] != MPI_PROC_NULL &&
+                     neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
+                     MPI_Start(&(sendRequests[shiftId]));
+                  }
+               }
+            }
+         }
+
          MPI_Waitall(27, receiveRequests.data(), MPI_STATUSES_IGNORE);         
          MPI_Waitall(27, sendRequests.data(), MPI_STATUSES_IGNORE);
       }
