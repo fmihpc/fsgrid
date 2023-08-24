@@ -26,6 +26,14 @@
 #include <limits>
 #include <stdint.h>
 #include <cassert>
+#ifdef __CUDACC__
+   #define ARCH_HOSTDEV __host__ __device__
+   #include "cuda.h"
+   #include "cuda_runtime.h"
+#else
+   #define ARCH_HOSTDEV 
+#endif 
+
 
 
 
@@ -64,7 +72,7 @@ struct FsGridTools{
 
 
       //! Helper function to optimize decomposition of this grid over the given number of tasks
-      static void computeDomainDecomposition(const std::array<int, 3>& GlobalSize, int nProcs, std::array<int,3>& processDomainDecomposition) {
+      static void computeDomainDecomposition(const int GlobalSize[3], int nProcs, std::array<int,3>& processDomainDecomposition) {
          std::array<double, 3> systemDim;
          std::array<double, 3 > processBox;
          double optimValue = std::numeric_limits<double>::max();
@@ -129,12 +137,16 @@ struct FsGridCouplingInformation {
  * \param T datastructure containing the field in each cell which this grid manages
  * \param stencil ghost cell width of this grid
  */
-template <typename T, int stencil> class FsGrid : public FsGridTools{
+template <typename T, int TDim, int stencil> class FsGrid : public FsGridTools{
 
    public:
 
       typedef int64_t LocalID;
       typedef int64_t GlobalID;
+      T* data;
+
+   // Legacy constructor from coupling reference
+   FsGrid(int32_t globalSize[3], MPI_Comm parent_comm, std::array<bool,3> isPeriodic, FsGridCouplingInformation& coupling) : FsGrid(globalSize, parent_comm, isPeriodic, &coupling) {}
 
    // Legacy constructor from coupling reference
    FsGrid(std::array<int32_t,3> globalSize, MPI_Comm parent_comm, std::array<bool,3> isPeriodic, FsGridCouplingInformation& coupling) : FsGrid(globalSize, parent_comm, isPeriodic, &coupling) {}
@@ -144,8 +156,8 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
        * \param MPI_Comm The MPI communicator this grid should use.
        * \param isPeriodic An array specifying, for each dimension, whether it is to be treated as periodic.
        */
-   FsGrid(std::array<int32_t,3> globalSize, MPI_Comm parent_comm, std::array<bool,3> isPeriodic, FsGridCouplingInformation* coupling)
-            : globalSize(globalSize), coupling(coupling) {
+   FsGrid(int32_t globalSize[3], MPI_Comm parent_comm, std::array<bool,3> isPeriodic, FsGridCouplingInformation* coupling)
+            : globalSize{globalSize[0], globalSize[1], globalSize[2]}, coupling(coupling) {
          int status;
          int size;
 
@@ -272,7 +284,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          }
 
          // Allocate local storage array
-         size_t totalStorageSize=1;
+         totalStorageSize=1;
          for(int i=0; i<3; i++) {
             if(globalSize[i] <= 1) {
                // Collapsed dimension => only one cell thick
@@ -283,11 +295,11 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
             }
             totalStorageSize *= storageSize[i];
          }
-         data.resize(totalStorageSize);
+         data = (T*) malloc(totalStorageSize * TDim * sizeof(T));
          coupling->setCouplingSize(totalStorageSize);
 
          MPI_Datatype mpiTypeT;
-         MPI_Type_contiguous(sizeof(T), MPI_BYTE, &mpiTypeT);
+         MPI_Type_contiguous(TDim * sizeof(T), MPI_BYTE, &mpiTypeT);
          for(int x=-1; x<=1;x++) {
             for(int y=-1; y<=1;y++) {
                for(int z=-1; z<=1; z++) {
@@ -303,8 +315,8 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          for(int x=-1; x<=1;x++) {
             for(int y=-1; y<=1;y++) {
                for(int z=-1; z<=1; z++) {
-                  std::array<int,3> subarraySize;
-                  std::array<int,3> subarrayStart;                  
+                  int subarraySize[3];
+                  int subarrayStart[3];                  
                   const int shiftId = (x+1) * 9 + (y + 1) * 3 + (z + 1);
                   
                   
@@ -339,14 +351,14 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                      if(storageSize[i] == 1) 
                         subarrayStart[i] = 0;
 
-                  std::array<int,3> swappedStorageSize = storageSize;
+                  int swappedStorageSize[3] = {storageSize[0], storageSize[1], storageSize[2]};
                   swapArray(swappedStorageSize);
                   swapArray(subarraySize);
                   swapArray(subarrayStart);                  
                   MPI_Type_create_subarray(3,
-                                           swappedStorageSize.data(),
-                                           subarraySize.data(),
-                                           subarrayStart.data(),
+                                           swappedStorageSize,
+                                           subarraySize,
+                                           subarrayStart,
                                            MPI_ORDER_C,
                                            mpiTypeT,
                                            &(neighbourSendType[shiftId]) );
@@ -375,9 +387,9 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                   
                   swapArray(subarrayStart);                  
                   MPI_Type_create_subarray(3,
-                                           swappedStorageSize.data(),
-                                           subarraySize.data(),
-                                           subarrayStart.data(),
+                                           swappedStorageSize,
+                                           subarraySize,
+                                           subarrayStart,
                                            MPI_ORDER_C,
                                            mpiTypeT,
                                            &(neighbourReceiveType[shiftId]));
@@ -394,6 +406,13 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          }
 
 
+      }
+
+      /*! Sets the data pointer to the given vector
+       * \param data pointer to the data vector
+       */
+      void setData(T *data) {
+         this->data = data;
       }
 
       /*! Finalize instead of destructor, as the MPI calls fail after the main program called MPI_Finalize().
@@ -498,7 +517,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
        * \param y The cell's task-local y coordinate
        * \param z The cell's task-local z coordinate
        */
-      LocalID LocalIDForCoords(int x, int y, int z) {
+      ARCH_HOSTDEV LocalID LocalIDForCoords(int x, int y, int z) {
          LocalID index=0;
          if(globalSize[2] > 1) {
             index += storageSize[0]*storageSize[1]*(stencil+z);
@@ -713,7 +732,8 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                   int receiveId = (1 - x) * 9 + ( 1 - y) * 3 + ( 1 - z);
                   if(neighbour[receiveId] != MPI_PROC_NULL &&
                      neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
-                     MPI_Irecv(data.data(), 1, neighbourReceiveType[shiftId], neighbour[receiveId], shiftId, comm3d, &(receiveRequests[shiftId]));
+                     // MPI_Irecv(data.data(), 1, neighbourReceiveType[shiftId], neighbour[receiveId], shiftId, comm3d, &(receiveRequests[shiftId]));
+                     MPI_Irecv(data, 1, neighbourReceiveType[shiftId], neighbour[receiveId], shiftId, comm3d, &(receiveRequests[shiftId]));
                   }
                }
             }
@@ -726,7 +746,8 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                   int sendId = shiftId;
                   if(neighbour[sendId] != MPI_PROC_NULL &&
                      neighbourSendType[shiftId] != MPI_DATATYPE_NULL) {
-                     MPI_Isend(data.data(), 1, neighbourSendType[shiftId], neighbour[sendId], shiftId, comm3d, &(sendRequests[shiftId]));
+                     // MPI_Isend(data.data(), 1, neighbourSendType[shiftId], neighbour[sendId], shiftId, comm3d, &(sendRequests[shiftId]));
+                     MPI_Isend(data, 1, neighbourSendType[shiftId], neighbour[sendId], shiftId, comm3d, &(sendRequests[shiftId]));
                   }
                }
             }
@@ -736,23 +757,26 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       }
    
    
-   
+      int32_t* getStorageSize() {
+         return storageSize;
+      }
 
       /*! Get the size of the local domain handled by this grid.
        */
-      std::array<int32_t, 3>& getLocalSize() {
+      int32_t* getLocalSize() {
+      // std::array<int32_t, 3>& getLocalSize() {
          return localSize;
       }
 
       /*! Get the sstart coordinates of the local domain handled by this grid.
        */
-      std::array<int32_t, 3>& getLocalStart() {
+      int32_t* getLocalStart() {
          return localStart;
       }
 
       /*! Get global size of the fsgrid domain
        */
-      std::array<int32_t, 3>& getGlobalSize() {
+      ARCH_HOSTDEV int* getGlobalSize() {
          return globalSize;
       }
 
@@ -764,13 +788,10 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
        *
        * \return Global cell coordinates
        */
-      std::array<int32_t, 3> getGlobalIndices(int x, int y, int z) {
-         std::array<int32_t, 3> retval;
+      ARCH_HOSTDEV void getGlobalIndices(int x, int y, int z, int32_t (&retval)[3]) {
          retval[0] = localStart[0] + x;
          retval[1] = localStart[1] + y;
          retval[2] = localStart[2] + z;
-
-         return retval;
       }
 
       /*! Get a reference to the field data in a cell
@@ -779,7 +800,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
        * \param z z-Coordinate, in cells
        * \return A reference to cell data in the given cell
        */
-      T* get(int x, int y, int z) {
+      ARCH_HOSTDEV T* get(int x, int y, int z) {
 
          // Keep track which neighbour this cell actually belongs to (13 = ourself)
          int isInNeighbourDomain=13;
@@ -864,7 +885,6 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
                // Neighbour doesn't exist, we must be an outer boundary cell
                // (or something is quite wrong)
                return NULL;
-
             } else if(neighbour[isInNeighbourDomain] == rank) {
                // For periodic boundaries, where the neighbour is actually ourself,
                // return our own actual cell instead of the ghost
@@ -876,17 +896,27 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          }
          LocalID index = LocalIDForCoords(x,y,z);
 
-         return &data[index];
+         return &data[index * TDim];
       }
 
-      T* get(LocalID id) {
-         if(id < 0 || (unsigned int)id > data.size()) {
-            std::cerr << "Out-of-bounds access in FsGrid::get!" << std::endl
-               << "(LocalID = " << id << ", but storage space is " << data.size()
-               << ". Expect weirdness." << std::endl;
+      ARCH_HOSTDEV T* get(LocalID id) {
+         if(id < 0 || (unsigned int)id > totalStorageSize) {
+            #ifndef __CUDA_ARCH__ 
+               std::cerr << "Out-of-bounds access in FsGrid::get!" << std::endl
+                  << "(LocalID = " << id << ", but storage space is " << totalStorageSize
+                  << ". Expect weirdness." << std::endl;
+            #endif
             return NULL;
          }
-         return &data[id];
+         return &data[id * TDim];
+      }
+
+      ARCH_HOSTDEV T& get(int x, int y, int z, int i) {
+         return (get(x,y,z)[i]);
+      }
+
+      ARCH_HOSTDEV T& getData(int i=0) const {
+            return data[i]; 
       }
 
       /*! Physical grid spacing and physical coordinate space start.
@@ -971,7 +1001,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       std::vector<MPI_Request> requests;
       uint numRequests;
 
-      std::array<int, 27> neighbour; //!< Tasks of the 26 neighbours (plus ourselves)
+      int neighbour[27]; //!< Tasks of the 26 neighbours (plus ourselves)
       std::vector<char> neighbour_index; //!< Lookup table from rank to index in the neighbour array
 
       // We have, fundamentally, two different coordinate systems we're dealing with:
@@ -981,12 +1011,12 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       // 2) Cell numbers in global and local view
 
       std::array<bool, 3> periodic; //!< Information about whether a given direction is periodic
-      std::array<int32_t, 3> globalSize; //!< Global size of the simulation space, in cells
-      std::array<int32_t, 3> localSize;  //!< Local size of simulation space handled by this task (without ghost cells)
-      std::array<int32_t, 3> storageSize;  //!< Local size of simulation space handled by this task (including ghost cells)
-      std::array<int32_t, 3> localStart; //!< Offset of the local
-                                          //!coordinate system against
-                                          //!the global one
+      int32_t totalStorageSize; //!< Total number of cells in the local storage, including ghost cells 
+      int32_t globalSize[3]; //!< Global size of the simulation space, in cells
+      int32_t localSize[3];
+      // std::array<int32_t, 3> localSize;  //!< Local size of simulation space handled by this task (without ghost cells)
+      int32_t storageSize[3];  //!< Local size of simulation space handled by this task (including ghost cells)
+      int32_t localStart[3]; //!< Offset of the local coordinate system against the global one 
 
       FsGridCouplingInformation* coupling; // Information required to couple to external grids
 
@@ -996,7 +1026,8 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
 
 
       //! Actual storage of field data
-      std::vector<T> data;
+      // std::vector<T>* data;
+
 
       //! Helper function: given a global cellID, calculate the global cell coordinate from it.
       // This is then used do determine the task responsible for this cell, and the
@@ -1018,7 +1049,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          return cell;
       }
 
-      void swapArray(std::array<int, 3>& array) {
+      void swapArray(int array[3]) {
          int a = array[0];
          array[0] = array[2];
          array[2] = a;
