@@ -382,6 +382,10 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
             throw std::runtime_error("FSGrid too small domains");
          }
 
+         // NULL-initialize for all procs
+         neighbourSendType.fill(MPI_DATATYPE_NULL);
+         neighbourReceiveType.fill(MPI_DATATYPE_NULL);
+
          // If non-FS process, set rank to -1 and localSize to zero and return
          if(colorFs == MPI_UNDEFINED){
             rank = -1;
@@ -477,15 +481,7 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
 
          MPI_Datatype mpiTypeT;
          MPI_Type_contiguous(sizeof(T), MPI_BYTE, &mpiTypeT);
-         for(int x=-1; x<=1;x++) {
-            for(int y=-1; y<=1;y++) {
-               for(int z=-1; z<=1; z++) {
-                  neighbourSendType[(x+1) * 9 + (y + 1) * 3 + (z + 1)] = MPI_DATATYPE_NULL;
-                  neighbourReceiveType[(x+1) * 9 + (y + 1) * 3 + (z + 1)] = MPI_DATATYPE_NULL;
-               }
-            }
-         }
-         
+
          // Compute send and receive datatypes
          //loop through the shifts in the different directions
          for(int x=-1; x<=1;x++) {
@@ -589,28 +585,147 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          this->data = other.getData(); // Copy assignment
       }
 
-      /*! Finalize instead of destructor, as the MPI calls fail after the main program called MPI_Finalize().
-       *  Cleans up the cartesian communicator
+      /*! 
+       *  MPI calls fail after the main program called MPI_Finalize(),
+       *  so this can be used instead of the destructor
+       *  Cleans up the cartesian communicator and datatypes
        */
-      void finalize() {
-         // If not a non-FS process
-         if(rank != -1){
-            for(int i=0;i<27;i++){
-               if(neighbourReceiveType[i] != MPI_DATATYPE_NULL)
-                  MPI_Type_free(&(neighbourReceiveType[i]));
-               if(neighbourSendType[i] != MPI_DATATYPE_NULL)
-                  MPI_Type_free(&(neighbourSendType[i]));
-            }
+      void finalize() noexcept {
+         if (comm3d != MPI_COMM_NULL) {
+            MPI_Comm_free(&comm3d);
+            comm3d = MPI_COMM_NULL;
+         }
+         if(comm3d_aux != MPI_COMM_NULL) {
+            MPI_Comm_free(&comm3d_aux);
+            comm3d_aux = MPI_COMM_NULL;
+         }
+         if(comm1d != MPI_COMM_NULL) {
+            MPI_Comm_free(&comm1d);
+            comm1d = MPI_COMM_NULL;
+         }
+         if(comm1d_aux != MPI_COMM_NULL) {
+            MPI_Comm_free(&comm1d_aux);
+            comm1d_aux = MPI_COMM_NULL;
          }
 
-         if(comm3d != MPI_COMM_NULL)
-            MPI_Comm_free(&comm3d);
-         if(comm3d_aux != MPI_COMM_NULL)
-            MPI_Comm_free(&comm3d_aux);
-         if(comm1d != MPI_COMM_NULL)
-            MPI_Comm_free(&comm1d);
-         if(comm1d_aux != MPI_COMM_NULL)
-            MPI_Comm_free(&comm1d_aux);
+         for (auto& type : neighbourReceiveType) {
+            if (type != MPI_DATATYPE_NULL) {
+               MPI_Type_free(&type);
+               type = MPI_DATATYPE_NULL;
+            }
+         }
+         for (auto& type : neighbourSendType) {
+            if (type != MPI_DATATYPE_NULL) {
+               MPI_Type_free(&type);
+               type = MPI_DATATYPE_NULL;
+            }
+         }
+      }
+
+      /*!
+       *  If finalize() isn't called manually, object should be destroyed before MPI finalization
+       */
+      ~FsGrid() {
+         finalize();
+      }
+
+      friend void swap (FsGrid& first, FsGrid& second) noexcept {
+         using std::swap;
+         swap(first.DX, second.DX);
+         swap(first.DY, second.DY);
+         swap(first.DZ, second.DZ);
+         swap(first.physicalGlobalStart, second.physicalGlobalStart);
+         swap(first.comm1d, second.comm1d);
+         swap(first.comm1d_aux, second.comm1d_aux);
+         swap(first.comm3d, second.comm3d);
+         swap(first.comm3d_aux, second.comm3d_aux);
+         swap(first.rank, second.rank);
+         swap(first.requests, second.requests);
+         swap(first.numRequests, second.numRequests);
+         swap(first.neighbour, second.neighbour);
+         swap(first.neighbour_index, second.neighbour_index);
+         swap(first.ntasksPerDim, second.ntasksPerDim);
+         swap(first.taskPosition, second.taskPosition);
+         swap(first.periodic, second.periodic);
+         swap(first.globalSize, second.globalSize);
+         swap(first.localSize, second.localSize);
+         swap(first.storageSize, second.storageSize);
+         swap(first.localStart, second.localStart);
+         swap(first.neighbourSendType, second.neighbourSendType);
+         swap(first.neighbourReceiveType, second.neighbourReceiveType);
+         swap(first.data, second.data);
+      }
+
+      // Copy constructor
+      FsGrid(const FsGrid& other) : 
+         DX {other.DX},
+         DY {other.DY},
+         DZ {other.DZ},
+         physicalGlobalStart {other.physicalGlobalStart},
+         comm1d {MPI_COMM_NULL},
+         comm1d_aux {MPI_COMM_NULL},
+         comm3d {MPI_COMM_NULL},
+         comm3d_aux {MPI_COMM_NULL},
+         rank {other.rank}, 
+         requests {}, 
+         numRequests {0}, 
+         neighbour {other.neighbour},
+         neighbour_index {other.neighbour_index},
+         ntasksPerDim {other.ntasksPerDim},
+         taskPosition {other.taskPosition},
+         periodic {other.periodic},
+         globalSize {other.globalSize},
+         localSize {other.localSize},
+         storageSize {other.storageSize},
+         localStart {other.localStart},
+         neighbourSendType {},
+         neighbourReceiveType {},
+         data {other.data}
+      {
+         if (other.comm3d != MPI_COMM_NULL) {
+            MPI_Comm_dup(other.comm3d, &comm3d);
+         }
+
+         neighbourSendType.fill(MPI_DATATYPE_NULL);
+         neighbourReceiveType.fill(MPI_DATATYPE_NULL);
+         for (size_t i = 0; i < neighbourSendType.size(); ++i) {
+            if (other.neighbourSendType[i] != MPI_DATATYPE_NULL) {
+               MPI_Type_dup(other.neighbourSendType[i], neighbourSendType.data() + i);
+            }
+            if (other.neighbourReceiveType[i] != MPI_DATATYPE_NULL) {
+               MPI_Type_dup(other.neighbourReceiveType[i], neighbourReceiveType.data() + i);
+            }
+         }
+      }
+
+      // Move constructor
+      // We don't have a default constructor, so just set the MPI stuff NULL
+      FsGrid(FsGrid&& other) noexcept : 
+         comm1d {MPI_COMM_NULL},
+         comm1d_aux {MPI_COMM_NULL},
+         comm3d {MPI_COMM_NULL},
+         comm3d_aux {MPI_COMM_NULL},
+         neighbourSendType {},
+         neighbourReceiveType {}
+      {
+         // NULL all the MPI stuff so they won't get freed if destroyed
+         neighbourSendType.fill(MPI_DATATYPE_NULL);
+         neighbourReceiveType.fill(MPI_DATATYPE_NULL);
+
+         using std::swap;
+         swap(*this, other);
+      }
+
+      // Copy assignment
+      // Canonical copy assign is construct to temp and swap, but this would result in an extra allocation of the entire grid
+      // Copy assignment is currently not used in Vlasiator, so the operator is deleted as any use is likely either erroneous or just a bad idea
+      FsGrid& operator=(FsGrid other) = delete;
+
+      // Move assignment
+      FsGrid& operator=(FsGrid&& other) noexcept {
+         using std::swap;
+         swap(*this, other);
+         return *this;
       }
 
       /*! Returns the task responsible, and its localID for handling the cell with the given GlobalID
@@ -913,12 +1028,6 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
          return &data[id];
       }
 
-      /*! Physical grid spacing and physical coordinate space start.
-       * TODO: Should this be private and have accesor-functions?
-       */
-      double DX,DY,DZ;
-      std::array<double,3> physicalGlobalStart;
-
       /*! Get the physical coordinates in the global simulation space for
        * the given cell.
        *
@@ -1009,6 +1118,12 @@ template <typename T, int stencil> class FsGrid : public FsGridTools{
       std::array<Task_t, 3>& getDecomposition(){
          return ntasksPerDim;
       }
+
+      /*! Physical grid spacing and physical coordinate space start.
+       * TODO: Should this be private and have accesor-functions?
+       */
+      double DX,DY,DZ;
+      std::array<double,3> physicalGlobalStart;
 
    private:
       //! MPI Cartesian communicator used in this grid
