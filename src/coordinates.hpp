@@ -22,8 +22,6 @@
 */
 #include "tools.hpp"
 
-#include <cmath>
-
 namespace fsgrid_detail {
 using FsSize_t = FsGridTools::FsSize_t;
 using FsIndex_t = FsGridTools::FsIndex_t;
