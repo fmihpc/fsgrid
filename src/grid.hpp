@@ -291,10 +291,12 @@ public:
                   : static_cast<size_t>(std::accumulate(coordinates.storageSize.cbegin(),
                                                         coordinates.storageSize.cend(), 1, std::multiplies<>()))) {}
 
+   ~FsGrid() { finalize(); }
+
    /*! Finalize instead of destructor, as the MPI calls fail after the main program called MPI_Finalize().
     *  Cleans up the cartesian communicator
     */
-   void finalize() {
+   void finalize() noexcept {
       // If not a non-FS process
       if (rank != -1) {
          for (int32_t i = 0; i < 27; i++) {
