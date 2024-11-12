@@ -468,7 +468,7 @@ private:
    const Coordinates coordinates = {};
 
    //!< Task position to task mapping
-   std::vector<int32_t> tasks = {};
+   const std::vector<int32_t> tasks = {};
 
    //!< Lookup table from index to rank in the neighbour array (includes self)
    const std::array<int32_t, 27> neighbourIndexToRank = {
