@@ -317,11 +317,6 @@ public:
    std::vector<T>& getData() { return data; }
    const std::vector<T>& getData() const { return data; }
 
-   void copyData(FsGrid& other) {
-      // Copy assignment
-      data = other.getData();
-   }
-
    bool localIdInBounds(LocalID id) const { return 0 <= id && (size_t)id < data.size(); }
 
    T* get(LocalID id) {
@@ -430,7 +425,7 @@ public:
 
    /*! Perform ghost cell communication.
     */
-   void updateGhostCells() {
+   template <typename D> void updateGhostCells(D& data) {
       if (rank == -1) {
          return;
       }
@@ -468,6 +463,8 @@ public:
                        "Synchronization at ghost cell update failed");
    }
 
+   void updateGhostCells() { updateGhostCells(data); }
+
    /*! Perform an MPI_Allreduce with this grid's internal communicator
     * Function syntax is identical to MPI_Allreduce, except the final (communicator
     * argument will not be needed) */
@@ -491,10 +488,9 @@ public:
     * \return a task for the grid's cartesian communicator
     */
    Task_t getTaskForGlobalID(GlobalID id) const {
-      const auto taskIndex = coordinates.globalIdToTaskPos(id);
+      const auto taskPos = coordinates.globalIdToTaskPos(id);
       Task_t taskID = -1;
-      FSGRID_MPI_CHECK(MPI_Cart_rank(comm3d, taskIndex.data(), &taskID), "Unable to find FsGrid rank for global ID ",
-                       id);
+      FSGRID_MPI_CHECK(MPI_Cart_rank(comm3d, taskPos.data(), &taskID), "Unable to find FsGrid rank for global ID ", id);
 
       return taskID;
    }
