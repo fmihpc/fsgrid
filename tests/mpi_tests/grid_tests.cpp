@@ -7,9 +7,11 @@ TEST(FsGridTest, localToGlobalRoundtrip1) {
    const std::array<FsGridTools::FsSize_t, 3> globalSize{1024, 666, 71};
    const MPI_Comm parentComm = MPI_COMM_WORLD;
    const std::array<bool, 3> periodic{true, true, false};
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
 
    const auto grid =
-       FsGrid<std::array<double, 15>, 1>(globalSize, parentComm, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+       FsGrid<std::array<double, 15>, 1>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
    const auto localSize = grid.getLocalSize();
    for (int32_t x = 0; x < localSize[0]; x++) {
       for (int32_t y = 0; y < localSize[1]; y++) {
@@ -31,9 +33,11 @@ TEST(FsGridTest, myGlobalIDCorrespondsToMyTask) {
    const std::array<FsGridTools::FsSize_t, 3> globalSize{6547, 16, 77};
    const MPI_Comm parentComm = MPI_COMM_WORLD;
    const std::array<bool, 3> periodic{true, false, false};
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
 
    const auto grid =
-       FsGrid<std::array<double, 6>, 1>(globalSize, parentComm, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+       FsGrid<std::array<double, 6>, 1>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
    const auto localSize = grid.getLocalSize();
    for (int32_t x = 0; x < localSize[0]; x++) {
       for (int32_t y = 0; y < localSize[1]; y++) {
@@ -52,9 +56,11 @@ TEST(FsGridTest, localIdInBounds) {
    const std::array<FsGridTools::FsSize_t, 3> globalSize{647, 1, 666};
    const MPI_Comm parentComm = MPI_COMM_WORLD;
    const std::array<bool, 3> periodic{true, false, true};
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
 
    const auto grid =
-       FsGrid<std::array<double, 50>, 1>(globalSize, parentComm, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+       FsGrid<std::array<double, 50>, 1>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
    const auto localSize = grid.getLocalSize();
    for (int32_t x = 0; x < localSize[0]; x++) {
       for (int32_t y = 0; y < localSize[1]; y++) {
@@ -71,9 +77,11 @@ TEST(FsGridTest, getNonPeriodic) {
    const MPI_Comm parentComm = MPI_COMM_WORLD;
    const std::array<bool, 3> periodic{false, false, false};
    constexpr int32_t numGhostCells = 1;
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
 
-   auto grid =
-       FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+   auto grid = FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0},
+                                                            {0.0, 0.0, 0.0});
    const auto localSize = grid.getLocalSize();
    for (int32_t x = 0; x < localSize[0]; x++) {
       for (int32_t y = 0; y < localSize[1]; y++) {
@@ -116,9 +124,11 @@ TEST(FsGridTest, getPeriodic) {
    const MPI_Comm parentComm = MPI_COMM_WORLD;
    const std::array<bool, 3> periodic{true, true, true};
    constexpr int32_t numGhostCells = 2;
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
 
-   auto grid =
-       FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, periodic, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+   auto grid = FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0},
+                                                            {0.0, 0.0, 0.0});
    const auto localSize = grid.getLocalSize();
    for (int32_t x = 0; x < localSize[0]; x++) {
       for (int32_t y = 0; y < localSize[1]; y++) {
@@ -142,4 +152,35 @@ TEST(FsGridTest, getPeriodic) {
    ASSERT_EQ(grid.get(0, 0, -numGhostCells - 1), nullptr);
    ASSERT_NE(grid.get(0, 0, grid.getLocalSize()[2] + numGhostCells - 1), nullptr);
    ASSERT_EQ(grid.get(0, 0, grid.getLocalSize()[2] + numGhostCells), nullptr);
+}
+
+TEST(FsGridTest, getTaskForGlobalID1) {
+   const std::array<FsGridTools::FsSize_t, 3> globalSize{11, 5, 1048};
+   const MPI_Comm parentComm = MPI_COMM_WORLD;
+   const std::array<bool, 3> periodic{true, true, false};
+   constexpr int32_t numGhostCells = 2;
+   auto numProcs = 0;
+   MPI_Comm_size(parentComm, &numProcs);
+
+   auto grid = FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0},
+                                                            {0.0, 0.0, 0.0});
+   constexpr auto id = 666;
+   const auto task = grid.getTaskForGlobalID(id);
+   printf("Task for id %d: %d\n", id, task);
+   ASSERT_EQ(0, task);
+}
+
+TEST(FsGridTest, getTaskForGlobalID2) {
+   const std::array<FsGridTools::FsSize_t, 3> globalSize{11, 5, 1048};
+   const MPI_Comm parentComm = MPI_COMM_WORLD;
+   const std::array<bool, 3> periodic{true, true, false};
+   constexpr int32_t numGhostCells = 2;
+   auto numProcs = 4;
+
+   auto grid = FsGrid<std::array<double, 8>, numGhostCells>(globalSize, parentComm, numProcs, periodic, {0.0, 0.0, 0.0},
+                                                            {0.0, 0.0, 0.0});
+   constexpr auto id = 666;
+   const auto task = grid.getTaskForGlobalID(id);
+   printf("Task for id %d: %d\n", id, task);
+   ASSERT_EQ(0, task);
 }

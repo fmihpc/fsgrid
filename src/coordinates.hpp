@@ -21,6 +21,7 @@
   along with fsgrid.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "tools.hpp"
+#include <algorithm>
 
 namespace fsgrid_detail {
 using FsSize_t = FsGridTools::FsSize_t;
@@ -61,6 +62,10 @@ constexpr static std::array<FsIndex_t, 3> calculateLocalSize(const std::array<Fs
                                                              const std::array<Task_t, 3>& numTasksPerDim,
                                                              const std::array<Task_t, 3>& taskPosition,
                                                              int32_t numGhostCells) {
+   if (taskPosition[0] < 0 || taskPosition[1] < 0 || taskPosition[2] < 0) {
+      return std::array{0, 0, 0};
+   }
+
    std::array localSize = {
        FsGridTools::calcLocalSize(globalSize[0], numTasksPerDim[0], taskPosition[0]),
        FsGridTools::calcLocalSize(globalSize[1], numTasksPerDim[1], taskPosition[1]),

@@ -29,14 +29,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <iomanip>
-#include <ios>
-#include <iostream>
 #include <limits>
 #include <mpi.h>
 #include <numeric>
-#include <sstream>
-#include <type_traits>
 #include <vector>
 
 namespace fsgrid_detail {
@@ -112,42 +107,18 @@ static std::vector<char> mapNeighbourRankToIndex(const std::array<int32_t, 27>& 
    return indices;
 }
 
-static int32_t getFSCommSize(int32_t parentCommSize) {
-   const auto envVar = getenv("FSGRID_PROCS");
-   const auto fsgridProcs = envVar != NULL ? atoi(envVar) : 0;
-   return parentCommSize > fsgridProcs && fsgridProcs > 0 ? fsgridProcs : parentCommSize;
-}
-
 static int32_t getCommRank(MPI_Comm parentComm) {
-   int32_t parentRank;
+   int32_t parentRank = -1;
    FSGRID_MPI_CHECK(MPI_Comm_rank(parentComm, &parentRank), "Couldn't get rank from parent communicator");
    return parentRank;
 }
 
-static int32_t getCommSize(MPI_Comm parentComm) {
-   int32_t parentCommSize;
-   FSGRID_MPI_CHECK(MPI_Comm_size(parentComm, &parentCommSize), "Couldn't get size from parent communicator");
-   return parentCommSize;
-}
-
-constexpr static int32_t computeColourFs(int32_t parentRank, int32_t numRanks) {
-   return (parentRank < numRanks) ? 1 : MPI_UNDEFINED;
-}
-
-constexpr static int32_t computeColourAux(int32_t parentRank, int32_t parentCommSize, int32_t numRanks) {
-   return (parentRank > (parentCommSize - 1) % numRanks) ? (parentRank - (parentCommSize % numRanks)) / numRanks
-                                                         : MPI_UNDEFINED;
-}
-
 static MPI_Comm createCartesianCommunicator(MPI_Comm parentComm, const std::array<Task_t, 3>& numTasksPerDim,
-                                            const std::array<bool, 3>& isPeriodic) {
+                                            const std::array<bool, 3>& isPeriodic, int32_t numProcs) {
    const auto parentRank = getCommRank(parentComm);
-   const auto parentSize = getCommSize(parentComm);
-   const auto numFsRanks = getFSCommSize(parentSize);
-   const auto colourFs = computeColourFs(parentRank, numFsRanks);
-   const auto colour = colourFs != MPI_UNDEFINED ? colourFs : computeColourAux(parentRank, parentSize, numFsRanks);
+   const auto colour = (parentRank < numProcs) ? 1 : MPI_UNDEFINED;
 
-   MPI_Comm comm;
+   MPI_Comm comm = MPI_COMM_NULL;
    FSGRID_MPI_CHECK(MPI_Comm_split(parentComm, colour, parentRank, &comm),
                     "Couldn's split parent communicator to subcommunicators");
 
@@ -156,27 +127,29 @@ static MPI_Comm createCartesianCommunicator(MPI_Comm parentComm, const std::arra
        isPeriodic[1],
        isPeriodic[2],
    };
-   MPI_Comm comm3d;
-   FSGRID_MPI_CHECK(MPI_Cart_create(comm, 3, numTasksPerDim.data(), pi.data(), 0, &comm3d),
-                    "Creating cartesian communicatior failed when attempting to create FsGrid!");
-   FSGRID_MPI_CHECK(MPI_Comm_free(&comm), "Failed to free MPI comm");
+
+   MPI_Comm comm3d = MPI_COMM_NULL;
+   if (comm != MPI_COMM_NULL) {
+      FSGRID_MPI_CHECK(MPI_Cart_create(comm, 3, numTasksPerDim.data(), pi.data(), 0, &comm3d),
+                       "Creating cartesian communicatior failed when attempting to create FsGrid!");
+
+      FSGRID_MPI_CHECK(MPI_Comm_free(&comm), "Failed to free MPI comm");
+   }
 
    return comm3d;
 }
 
-static int32_t getCartesianRank(MPI_Comm parentComm, MPI_Comm cartesianComm) {
-   const auto parentRank = getCommRank(parentComm);
-   const auto parentSize = getCommSize(parentComm);
-   const auto numFsRanks = getFSCommSize(parentSize);
-   const auto colourFs = computeColourFs(parentRank, numFsRanks);
-   return colourFs != MPI_UNDEFINED ? getCommRank(cartesianComm) : -1;
+static int32_t getCartesianRank(MPI_Comm cartesianComm) {
+   return cartesianComm != MPI_COMM_NULL ? getCommRank(cartesianComm) : -1;
 }
 
 static std::array<int32_t, 3> getTaskPosition(MPI_Comm comm) {
-   std::array<int32_t, 3> taskPos;
-   const int rank = getCommRank(comm);
-   FSGRID_MPI_CHECK(MPI_Cart_coords(comm, rank, taskPos.size(), taskPos.data()), "Rank ", rank,
-                    " unable to determine own position in cartesian communicator when attempting to create FsGrid!");
+   std::array<int32_t, 3> taskPos{-1, -1, -1};
+   if (comm != MPI_COMM_NULL) {
+      const int rank = getCommRank(comm);
+      FSGRID_MPI_CHECK(MPI_Cart_coords(comm, rank, taskPos.size(), taskPos.data()), "Rank ", rank,
+                       " unable to determine own position in cartesian communicator when attempting to create FsGrid!");
+   }
    return taskPos;
 }
 
@@ -241,6 +214,29 @@ static std::array<MPI_Datatype, 27> generateMPITypes(const std::array<FsIndex_t,
 
    return types;
 }
+
+static std::vector<int32_t> taskPosToTask(MPI_Comm parentComm, MPI_Comm cartesianComm,
+                                          const std::array<Task_t, 3>& numTasksPerDim) {
+   std::vector<int32_t> tasks(static_cast<size_t>(numTasksPerDim[0] * numTasksPerDim[1] * numTasksPerDim[2]));
+   if (cartesianComm != MPI_COMM_NULL) {
+      size_t i = 0;
+      for (auto x = 0; x < numTasksPerDim[0]; x++) {
+         for (auto y = 0; y < numTasksPerDim[1]; y++) {
+            for (auto z = 0; z < numTasksPerDim[2]; z++) {
+               const std::array coords = {x, y, z};
+               FSGRID_MPI_CHECK(MPI_Cart_rank(cartesianComm, coords.data(), &tasks[i++]),
+                                "Unable to get rank from cartesian communicator");
+            }
+         }
+      }
+   }
+
+   FSGRID_MPI_CHECK(
+       MPI_Bcast(static_cast<void*>(tasks.data()), static_cast<int32_t>(tasks.size()), MPI_INT, 0, parentComm),
+       "Unable to broadcast task pos array");
+
+   return tasks;
+}
 } // namespace fsgrid_detail
 
 /*! Simple cartesian, non-loadbalancing MPI Grid for use with the fieldsolver
@@ -261,23 +257,20 @@ public:
     * \param MPI_Comm The MPI communicator this grid should use.
     * \param periodic An array specifying, for each dimension, whether it is to be treated as periodic.
     */
-   FsGrid(const std::array<FsSize_t, 3>& globalSize, MPI_Comm parentComm, const std::array<bool, 3>& periodic,
-          const std::array<double, 3>& physicalGridSpacing, const std::array<double, 3>& physicalGlobalStart,
-          const std::array<Task_t, 3>& decomposition = {0, 0, 0})
-       : comm3d(fsgrid_detail::createCartesianCommunicator(
-             parentComm,
-             fsgrid_detail::computeNumTasksPerDim(globalSize, decomposition,
-                                                  fsgrid_detail::getFSCommSize(fsgrid_detail::getCommSize(parentComm)),
-                                                  stencil),
-             periodic)),
-         rank(fsgrid_detail::getCartesianRank(parentComm, comm3d)),
+   FsGrid(const std::array<FsSize_t, 3>& globalSize, MPI_Comm parentComm, int32_t numProcs,
+          const std::array<bool, 3>& periodic, const std::array<double, 3>& physicalGridSpacing,
+          const std::array<double, 3>& physicalGlobalStart, const std::array<Task_t, 3>& decomposition = {0, 0, 0})
+       : numProcs(numProcs),
+         comm3d(fsgrid_detail::createCartesianCommunicator(
+             parentComm, fsgrid_detail::computeNumTasksPerDim(globalSize, decomposition, numProcs, stencil), periodic,
+             numProcs)),
+         rank(fsgrid_detail::getCartesianRank(comm3d)),
          coordinates(physicalGridSpacing, physicalGlobalStart, globalSize, periodic, decomposition,
-                     fsgrid_detail::getTaskPosition(comm3d),
-                     fsgrid_detail::getFSCommSize(fsgrid_detail::getCommSize(parentComm)), stencil),
+                     fsgrid_detail::getTaskPosition(comm3d), numProcs, stencil),
+         tasks(fsgrid_detail::taskPosToTask(parentComm, comm3d, coordinates.numTasksPerDim)),
          neighbourIndexToRank(fsgrid_detail::mapNeigbourIndexToRank(
              fsgrid_detail::getTaskPosition(comm3d), coordinates.numTasksPerDim, periodic, comm3d, rank)),
-         neighbourRankToIndex(fsgrid_detail::mapNeighbourRankToIndex(
-             neighbourIndexToRank, fsgrid_detail::getFSCommSize(fsgrid_detail::getCommSize(parentComm)))),
+         neighbourRankToIndex(fsgrid_detail::mapNeighbourRankToIndex(neighbourIndexToRank, numProcs)),
          neighbourSendType(
              fsgrid_detail::generateMPITypes<T>(coordinates.storageSize, coordinates.localSize, stencil, true)),
          neighbourReceiveType(
@@ -376,40 +369,27 @@ public:
       return localIDFromCellCoordinates(indices[0], indices[1], indices[2]);
    }
 
+   /*! Returns the task responsible for handling the cell with the given GlobalID
+    * \param id GlobalID of the cell for which task is to be determined
+    * \return a task for the grid's cartesian communicator
+    */
+   Task_t getTaskForGlobalID(GlobalID id) const {
+      const auto taskPos = coordinates.globalIdToTaskPos(id);
+      const int32_t i = taskPos[0] * (coordinates.numTasksPerDim[1] * coordinates.numTasksPerDim[2]) +
+                        taskPos[1] * coordinates.numTasksPerDim[2] + taskPos[2];
+      return tasks[static_cast<size_t>(i)];
+   }
+
    // ============================
    // Getters
    // ============================
-
-   /*! Get the size of the local domain handled by this grid.
-    */
-   const auto& getLocalSize() const {
-      constexpr static std::array zero{0, 0, 0};
-      return rank == -1 ? zero : coordinates.localSize;
-   }
-
-   /*! Get the start coordinates of the local domain handled by this grid.
-    */
+   const auto& getLocalSize() const { return coordinates.localSize; }
    const auto& getLocalStart() const { return coordinates.localStart; }
-
-   /*! Get global size of the fsgrid domain
-    */
    const auto& getGlobalSize() const { return coordinates.globalSize; }
-
-   /*! Get the rank of this CPU in the FsGrid communicator */
    Task_t getRank() const { return rank; }
-
-   /*! Get the number of ranks in the FsGrid communicator */
-   Task_t getNumFsRanks() const {
-      return coordinates.numTasksPerDim[0] * coordinates.numTasksPerDim[1] * coordinates.numTasksPerDim[2];
-   }
-
-   /*! Get in which directions, if any, this grid is periodic */
+   Task_t getNumFsRanks() const { return numProcs; }
    const auto& getPeriodic() const { return coordinates.periodic; }
-
-   /*! Get the decomposition array*/
    const auto& getDecomposition() const { return coordinates.numTasksPerDim; }
-
-   /*! Get the physical grid spacing array*/
    const auto& getGridSpacing() const { return coordinates.physicalGridSpacing; }
 
    // ============================
@@ -419,7 +399,7 @@ public:
    /*! Perform ghost cell communication.
     */
    template <typename D> void updateGhostCells(D& data) {
-      if (rank == -1) {
+      if (comm3d == MPI_COMM_NULL) {
          return;
       }
 
@@ -463,7 +443,7 @@ public:
     * argument will not be needed) */
    int32_t Allreduce(void* sendbuf, void* recvbuf, int32_t count, MPI_Datatype datatype, MPI_Op op) const {
       // If a normal FS-rank
-      if (rank != -1) {
+      if (comm3d != MPI_COMM_NULL) {
          return MPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm3d);
       }
       // If a non-FS rank, no need to communicate
@@ -476,18 +456,9 @@ public:
       }
    }
 
-   /*! Returns the task responsible for handling the cell with the given GlobalID
-    * \param id GlobalID of the cell for which task is to be determined
-    * \return a task for the grid's cartesian communicator
-    */
-   Task_t getTaskForGlobalID(GlobalID id) const {
-      const auto taskPos = coordinates.globalIdToTaskPos(id);
-      Task_t taskID = -1;
-      FSGRID_MPI_CHECK(MPI_Cart_rank(comm3d, taskPos.data(), &taskID), "Unable to find FsGrid rank for global ID ", id);
-
-      return taskID;
-   }
 private:
+   //! How many fieldsolver processes there are
+   const int32_t numProcs = 0;
    //! MPI Cartesian communicator used in this grid
    MPI_Comm comm3d = MPI_COMM_NULL;
    //!< This task's rank in the communicator
@@ -495,6 +466,9 @@ private:
 
    //!< A container for the coordinates of the fsgrid
    const Coordinates coordinates = {};
+
+   //!< Task position to task mapping
+   std::vector<int32_t> tasks = {};
 
    //!< Lookup table from index to rank in the neighbour array (includes self)
    const std::array<int32_t, 27> neighbourIndexToRank = {

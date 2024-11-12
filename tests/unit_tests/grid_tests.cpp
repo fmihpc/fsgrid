@@ -129,21 +129,3 @@ TEST(FsGridTest, xyzToLinearToxyz) {
       ASSERT_EQ(i, fsgrid_detail::xyzToLinear(x, y, z));
    }
 }
-
-TEST(FsGridTest, computeColourFs) {
-   constexpr int32_t numRanks = 666;
-   for (int32_t i = 0; i < numRanks; i++) {
-      ASSERT_EQ(fsgrid_detail::computeColourFs(i, numRanks), 1);
-   }
-
-   ASSERT_EQ(fsgrid_detail::computeColourFs(numRanks, numRanks), MPI_UNDEFINED);
-}
-
-TEST(FsGridTest, computeColorAux1) {
-   constexpr int32_t numRanks = 5;
-   constexpr int32_t parentCommSize = 16;
-   ASSERT_EQ(fsgrid_detail::computeColourAux(0, parentCommSize, numRanks), MPI_UNDEFINED);
-   for (int32_t i = 1; i < parentCommSize; i++) {
-      ASSERT_EQ(fsgrid_detail::computeColourAux(i, parentCommSize, numRanks), (i - 1) / numRanks);
-   }
-}
