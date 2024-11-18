@@ -236,7 +236,7 @@ TEST(FsGridToolsTests, MPI_err_check_should_throw) {
    EXPECT_THROW(
        {
           try {
-             FSGRID_MPI_CHECK(MPI_SUCCESS + 1, "Should throw with unsuccessful check");
+             FsGridTools::mpiCheck(MPI_SUCCESS + 1, "Should throw with unsuccessful check");
           } catch (const std::runtime_error& e) {
              EXPECT_STREQ("Unrecoverable error encountered in FsGrid, consult cerr for more information", e.what());
              throw;
@@ -245,4 +245,4 @@ TEST(FsGridToolsTests, MPI_err_check_should_throw) {
        std::runtime_error);
 }
 
-TEST(FsGridToolsTests, MPI_err_check_should_pass) { FSGRID_MPI_CHECK(MPI_SUCCESS, "This should pass"); }
+TEST(FsGridToolsTests, MPI_err_check_should_pass) { FsGridTools::mpiCheck(MPI_SUCCESS, "This should pass"); }

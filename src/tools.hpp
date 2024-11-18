@@ -28,13 +28,6 @@
 #include <stdexcept>
 #include <stdint.h>
 
-#define FSGRID_MPI_CHECK(status, ...) FsGridTools::writeToCerrAndThrowIfFailed(status != MPI_SUCCESS, __VA_ARGS__)
-#ifdef FSGRID_DEBUG
-#define FSGRID_DEBUG_ASSERT(condition, ...) FsGridTools::writeToCerrAndThrowIfFailed(condition, __VA_ARGS__)
-#else
-#define FSGRID_DEBUG_ASSERT(condition, ...)
-#endif
-
 namespace FsGridTools {
 // Size type for global array indices
 typedef uint32_t FsSize_t;
@@ -172,5 +165,15 @@ template <typename... Args> void writeToCerrAndThrowIfFailed(bool failed, Args..
       cerrArgs(args...);
       throw std::runtime_error("Unrecoverable error encountered in FsGrid, consult cerr for more information");
    }
+}
+
+template <typename... Args> void mpiCheck(int status, Args... args) {
+   writeToCerrAndThrowIfFailed(status != MPI_SUCCESS, args...);
+}
+
+template <typename... Args> void debugAssert([[maybe_unused]] bool condition, [[maybe_unused]] Args... args) {
+#ifdef FSGRID_DEBUG
+   writeToCerrAndThrowIfFailed(condition, args...);
+#endif
 }
 } // namespace FsGridTools
