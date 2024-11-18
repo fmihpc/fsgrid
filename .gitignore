@@ -26,3 +26,10 @@
 *.exe
 *.out
 *.app
+
+# directories to ignore
+build/
+.cache/
+
+# compile_commands
+compile_commands.json
