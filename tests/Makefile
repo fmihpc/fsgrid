@@ -11,6 +11,8 @@ test: test.cpp ../fsgrid.hpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
 ddtest: ddtest.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
+gol: gol.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $<
 
 clean:
 	-rm test ddtest benchmark
