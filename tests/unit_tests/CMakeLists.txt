@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.18)
+
+find_package(MPI REQUIRED)
+
+set(testname ${PROJECT_NAME}_unit_tests)
+
+add_executable(
+    ${testname}
+    coordinates_tests.cpp
+    data_tests.cpp
+    fsstencil_tests.cpp
+    grid_tests.cpp
+    tools_tests.cpp
+)
+
+target_include_directories(${testname} PRIVATE
+    "${PROJECT_SOURCE_DIR}/src"
+    )
+
+target_link_libraries(
+  ${testname}
+  GTest::gtest_main
+  MPI::MPI_CXX
+  OpenMP::OpenMP_CXX
+)
+
+gtest_discover_tests(${testname})

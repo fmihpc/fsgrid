@@ -1,0 +1,58 @@
+name: CMake build and test fsgrid
+
+on:
+  push:
+    branches: [ "master", "development", "ctest_gtest" ]
+  pull_request:
+    branches: [ "master", "development", "ctest_gtest" ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+  PROJECT_NAME: fsgrid
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install OpenMPI
+      run: >
+        sudo apt-get install
+        openmpi-bin
+        libopenmpi-dev
+        openmpi-common
+
+    - name: Configure CMake
+      run: >
+        cmake
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -Dproject_name=${{env.PROJECT_NAME}}
+        -DMPI_TEST_NUM_PROCS=16
+        -DMPI_TEST_EXTRA_FLAGS=--oversubscribe
+
+    - name: Build
+      run: >
+        cmake
+        --build ${{github.workspace}}/build
+        --config ${{env.BUILD_TYPE}}
+
+    - name: Test
+      id: test
+      working-directory: ${{github.workspace}}
+      run: >
+        ctest
+        --test-dir ${{github.workspace}}/build/
+        -C ${{env.BUILD_TYPE}}
+        --output-on-failure
+        --output-log ${{github.workspace}}/build/github_test_log.log
+
+    - name: Archive test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs
+        path: ${{github.workspace}}/build/github_test_log.log
