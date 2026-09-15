@@ -94,8 +94,8 @@ static std::array<int32_t, 27> mapNeigbourIndexToRank(const std::array<Task_t, 3
    return ranks;
 }
 
-static std::vector<char> mapNeighbourRankToIndex(const std::array<int32_t, 27>& indexToRankMap, int32_t numRanks) {
-   std::vector<char> indices(static_cast<size_t>(numRanks), MPI_PROC_NULL);
+static std::vector<int> mapNeighbourRankToIndex(const std::array<int32_t, 27>& indexToRankMap, int32_t numRanks) {
+   std::vector<int> indices(static_cast<size_t>(numRanks), MPI_PROC_NULL);
    std::for_each(indexToRankMap.cbegin(), indexToRankMap.cend(), [&indices, &numRanks, n = 0u](int32_t rank) mutable {
       if (rank >= 0 && numRanks > rank) {
          indices[static_cast<FsSize_t>(rank)] = static_cast<int8_t>(n);
@@ -627,7 +627,7 @@ private:
        MPI_PROC_NULL, MPI_PROC_NULL, MPI_PROC_NULL, MPI_PROC_NULL, MPI_PROC_NULL, MPI_PROC_NULL,
    };
    //!< Lookup table from rank to index in the neighbour array
-   const std::vector<char> neighbourRankToIndex = {};
+   const std::vector<int> neighbourRankToIndex = {};
 
    //!< Type containing data computed from FsGrid values that are constant for all stencils
    const StencilConstants stencilConstants = {};
